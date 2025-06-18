@@ -435,4 +435,210 @@ public class RestMs extends Application {
                 // Attempt to load from DB if not in memory
                 try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
                      PreparedStatement pstmt = conn.prepareStatement("SELECT order_details, reserved_table, is_paid FROM customer_orders WHERE customer_name = ?")) {
-                    pstm
+                    pstmt.setString(1, customerName);
+                    ResultSet rs = pstmt.executeQuery();
+                    if (rs.next()) {
+                        String orderDetails = rs.getString("order_details");
+                        if (orderDetails != null && !orderDetails.isEmpty()) {
+                            orders = new ArrayList<>(Arrays.asList(orderDetails.split(",")));
+                            // Trim and normalize each item
+                            orders.replaceAll(String::trim);
+                            orders.replaceAll(String::toLowerCase);
+                        } else {
+                            orders = new ArrayList<>(); // No order details
+                        }
+                        cus_list.put(customerName, orders); // Add to in-memory for future use
+                        if (rs.getInt("is_paid") == 1) {
+                            paidCustomers.add(customerName);
+                        }
+                        String reservedTable = rs.getString("reserved_table");
+                        if (reservedTable != null) {
+                            cu_tab.put(customerName, reservedTable);
+                        }
+                    } else {
+                        new Alert(Alert.AlertType.ERROR, "Customer not found in database or memory with an order.").show();
+                        return;
+                    }
+                } catch (SQLException ex) {
+                    new Alert(Alert.AlertType.ERROR, "Error fetching customer data: " + ex.getMessage()).show();
+                    return;
+                }
+            }
+
+            if (orders.isEmpty()) {
+                new Alert(Alert.AlertType.INFORMATION, "No order found for " + customerName + ". Cannot generate bill.").show();
+                stage.close();
+                return;
+            }
+
+            int total = 0;
+            StringBuilder invalidItems = new StringBuilder();
+
+            for (String item : orders) {
+                String price = menu.get(item);
+                if (price != null) {
+                    try {
+                        total += Integer.parseInt(price);
+                    } catch (NumberFormatException nfe) {
+                        invalidItems.append(item).append(" (invalid price), ");
+                    }
+                } else {
+                    invalidItems.append(item).append(" (not in menu), ");
+                }
+            }
+
+            // Update in-memory
+            cu_bill.put(customerName, total);
+            paidCustomers.add(customerName);
+
+            // Update database: mark as paid and update bill amount
+            try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+                 PreparedStatement pstmt = conn.prepareStatement("UPDATE customer_orders SET bill_amount = ?, is_paid = ? WHERE customer_name = ?")) {
+                pstmt.setInt(1, total);
+                pstmt.setInt(2, 1); // 1 for paid
+                pstmt.setString(3, customerName);
+                pstmt.executeUpdate();
+            } catch (SQLException ex) {
+                new Alert(Alert.AlertType.ERROR, "Error updating bill in database: " + ex.getMessage()).show();
+            }
+
+            // Release table in-memory and in DB
+            if (cu_tab.containsKey(customerName)) {
+                int table = Integer.parseInt(cu_tab.get(customerName));
+                tableAvailability.put(table, true);
+                cu_tab.remove(customerName); // Remove table association from in-memory
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+                     PreparedStatement pstmt = conn.prepareStatement("UPDATE table_status SET is_available = 1 WHERE table_number = ?")) {
+                    pstmt.setInt(1, table);
+                    pstmt.executeUpdate();
+                } catch (SQLException ex) {
+                    System.err.println("Error freeing table in database: " + ex.getMessage());
+                }
+            }
+
+            String result = "Name: " + customerName +
+                    "\nOrder: " + String.join(", ", orders) +
+                    "\nBill: Rs." + total +
+                    "\nPoints Earned: " + (total / 10);
+
+            if (invalidItems.length() > 0) {
+                result += "\nInvalid or unrecognized items: " + invalidItems.substring(0, invalidItems.length() - 2) + "."; // Remove trailing ", "
+            }
+
+            new Alert(Alert.AlertType.INFORMATION, result).show();
+            stage.close();
+        });
+
+        box.getChildren().addAll(customerLabel, generateBtn);
+        stage.setScene(new Scene(box, 300, 200));
+        stage.setTitle("Bill Generator");
+        stage.show();
+    }
+
+    private void updateMenuPrice() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        TextField itemField = new TextField();
+        itemField.setPromptText("Enter item name");
+
+        TextField priceField = new TextField();
+        priceField.setPromptText("Enter new price");
+
+        Button update = new Button("Update Price");
+
+        update.setOnAction(e -> {
+            String item = itemField.getText().trim().toLowerCase();
+            String newPrice = priceField.getText().trim();
+            if (item.isEmpty() || newPrice.isEmpty()) {
+                new Alert(Alert.AlertType.WARNING, "Item name and new price cannot be empty.").show();
+                return;
+            }
+
+            if (!newPrice.matches("\\d+")) { // Basic validation for price being a number
+                new Alert(Alert.AlertType.WARNING, "Price must be a number.").show();
+                return;
+            }
+
+            if (menu.containsKey(item)) {
+                menu.put(item, newPrice); // Update in-memory
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+                     PreparedStatement pstmt = conn.prepareStatement("UPDATE menu_items SET price = ? WHERE item_name = ?")) {
+                    pstmt.setString(1, newPrice);
+                    pstmt.setString(2, item);
+                    int rowsAffected = pstmt.executeUpdate();
+                    if (rowsAffected > 0) {
+                        new Alert(Alert.AlertType.INFORMATION, "Updated " + item + " price to Rs." + newPrice + " in database.").show();
+                        stage.close();
+                    } else {
+                        new Alert(Alert.AlertType.ERROR, "Item not found in database to update.").show();
+                    }
+                } catch (SQLException ex) {
+                    new Alert(Alert.AlertType.ERROR, "Error updating menu price in database: " + ex.getMessage()).show();
+                }
+            } else {
+                new Alert(Alert.AlertType.ERROR, "Item not found in menu").show();
+            }
+        });
+
+        layout.getChildren().addAll(itemField, priceField, update);
+        stage.setScene(new Scene(layout, 300, 200));
+        stage.setTitle("Update Price");
+        stage.show();
+    }
+
+    private void addNewMenuItem() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        TextField itemField = new TextField();
+        itemField.setPromptText("Enter new item name");
+
+        TextField priceField = new TextField();
+        priceField.setPromptText("Enter price");
+
+        Button add = new Button("Add Item");
+
+        add.setOnAction(e -> {
+            String item = itemField.getText().trim().toLowerCase();
+            String price = priceField.getText().trim();
+
+            if (item.isEmpty() || price.isEmpty()) {
+                new Alert(Alert.AlertType.WARNING, "Item name and price cannot be empty.").show();
+                return;
+            }
+
+            if (!price.matches("\\d+")) { // Basic validation for price being a number
+                new Alert(Alert.AlertType.WARNING, "Price must be a number.").show();
+                return;
+            }
+
+            if (!menu.containsKey(item)) {
+                menu.put(item, price); // Add to in-memory
+                try (Connection conn = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD);
+                     PreparedStatement pstmt = conn.prepareStatement("INSERT INTO menu_items (item_name, price) VALUES (?, ?)")) {
+                    pstmt.setString(1, item);
+                    pstmt.setString(2, price);
+                    pstmt.executeUpdate();
+                    new Alert(Alert.AlertType.INFORMATION, "Added " + item + " to menu at Rs." + price + " and saved to database.").show();
+                    stage.close();
+                } catch (SQLException ex) {
+                    new Alert(Alert.AlertType.ERROR, "Error adding new menu item to database: " + ex.getMessage()).show();
+                }
+            } else {
+                new Alert(Alert.AlertType.WARNING, "Item already exists. Use update instead.").show();
+            }
+        });
+
+        layout.getChildren().addAll(itemField, priceField, add);
+        stage.setScene(new Scene(layout, 300, 200));
+        stage.setTitle("Add Item");
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
