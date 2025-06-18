@@ -1,0 +1,353 @@
+package application;
+
+import javafx.application.Application;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.stage.Stage;
+
+import java.util.*;
+
+public class RestMs extends Application {
+
+    static Map<String, String> menu = new HashMap<>();
+    static Map<String, ArrayList<String>> cus_list = new HashMap<>();
+    static Map<String, String> cu_tab = new HashMap<>();
+    static Map<Integer, Boolean> tableAvailability = new HashMap<>();
+    static Map<String, Integer> cu_bill = new HashMap<>();
+    static Set<String> paidCustomers = new HashSet<>();
+
+    @Override
+    public void start(Stage primaryStage) {
+        showmenu();
+        initializeTables(5);
+
+        Label title = new Label("Craft Restaurant");
+        title.setStyle("-fx-font-size: 20px; -fx-font-weight: bold; -fx-text-fill: darkblue;");
+
+        Label label = new Label("Restaurant Management System");
+
+        Button customerBtn = new Button("Customer");
+        Button adminBtn = new Button("Admin");
+        Button exitBtn = new Button("Exit");
+
+        VBox layout = new VBox(15, title, label, customerBtn, adminBtn, exitBtn);
+        layout.setStyle("-fx-padding: 20; -fx-alignment: center;");
+        Scene scene = new Scene(layout, 350, 300);
+
+        customerBtn.setOnAction(e -> openCustomerMenu());
+        adminBtn.setOnAction(e -> openAdminMenu());
+        exitBtn.setOnAction(e -> {
+            if (!cu_bill.isEmpty() && !paidCustomers.containsAll(cu_bill.keySet())) {
+                new Alert(Alert.AlertType.WARNING, "A customer hasn't paid yet. Please pay the bill before exiting.").show();
+            } else {
+                primaryStage.close();
+            }
+        });
+
+        primaryStage.setTitle("Restaurant System");
+        primaryStage.setScene(scene);
+        primaryStage.show();
+    }
+
+    public static void showmenu() {
+        menu.put("rice", "30");
+        menu.put("roti", "20");
+        menu.put("chicken", "100");
+        menu.put("biryani", "99");
+        menu.put("desserts", "60");
+    }
+
+    public static void initializeTables(int count) {
+        for (int i = 1; i <= count; i++) {
+            tableAvailability.put(i, true);
+        }
+    }
+
+    private void openCustomerMenu() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        Button showMenuBtn = new Button("Show Menu");
+        Button orderBtn = new Button("Place Order");
+        Button reserveBtn = new Button("Reserve Table");
+        Button billBtn = new Button("Generate Bill");
+        Button leaveBtn = new Button("Leave");
+        Button backBtn = new Button("Back");
+
+        layout.getChildren().addAll(showMenuBtn, orderBtn, reserveBtn, billBtn, leaveBtn, backBtn);
+
+        showMenuBtn.setOnAction(e -> showMenuDialog());
+        orderBtn.setOnAction(e -> placeOrder());
+        reserveBtn.setOnAction(e -> reserveTable());
+        billBtn.setOnAction(e -> generateBill());
+        leaveBtn.setOnAction(e -> {
+            if (!paidCustomers.containsAll(cus_list.keySet())) {
+                new Alert(Alert.AlertType.WARNING, "Please pay your bill before leaving.").show();
+            } else {
+                for (String customer : new ArrayList<>(cus_list.keySet())) {
+                    if (paidCustomers.contains(customer)) {
+                        cus_list.remove(customer);
+                        paidCustomers.remove(customer);
+                        cu_tab.remove(customer);
+                        cu_bill.remove(customer);
+                    }
+                }
+                stage.close();
+            }
+        });
+        backBtn.setOnAction(e -> {
+            if (!paidCustomers.containsAll(cus_list.keySet())) {
+                new Alert(Alert.AlertType.WARNING, "Please pay your bill before going back.").show();
+            } else {
+                stage.close();
+            }
+        });
+
+        stage.setTitle("Customer Panel");
+        stage.setScene(new Scene(layout, 350, 250));
+        stage.show();
+    }
+
+    private void showMenuDialog() {
+        StringBuilder sb = new StringBuilder("Menu:\n");
+        menu.forEach((item, price) -> sb.append(item).append(": Rs.").append(price).append("\n"));
+        new Alert(Alert.AlertType.INFORMATION, sb.toString()).show();
+    }
+
+    private void openAdminMenu() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        Button viewCustomers = new Button("Number of Customers");
+        Button updatePrice = new Button("Update Item Price");
+        Button addItem = new Button("Add New Item");
+        Button showMenu = new Button("Show Menu");
+        Button tableStatus = new Button("Table Status");
+        Button backBtn = new Button("Back");
+
+        viewCustomers.setOnAction(e -> {
+            int count = cus_list.size();
+            new Alert(Alert.AlertType.INFORMATION, "Total Customers Served: " + count).show();
+        });
+
+        updatePrice.setOnAction(e -> updateMenuPrice());
+        addItem.setOnAction(e -> addNewMenuItem());
+        showMenu.setOnAction(e -> showMenuDialog());
+
+        tableStatus.setOnAction(e -> {
+            StringBuilder status = new StringBuilder("Table Status:\n");
+            for (int table = 1; table <= tableAvailability.size(); table++) {
+                boolean available = tableAvailability.getOrDefault(table, true);
+                status.append("Table ").append(table).append(": ").append(available ? "Available" : "Reserved").append("\n");
+            }
+            new Alert(Alert.AlertType.INFORMATION, status.toString()).show();
+        });
+
+        backBtn.setOnAction(e -> stage.close());
+
+        layout.getChildren().addAll(viewCustomers, updatePrice, addItem, showMenu, tableStatus, backBtn);
+        stage.setScene(new Scene(layout, 300, 250));
+        stage.setTitle("Admin Panel");
+        stage.show();
+    }
+
+    private void placeOrder() {
+        Stage stage = new Stage();
+        VBox box = new VBox(10);
+        box.setStyle("-fx-padding: 10;");
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Enter your name");
+
+        TextArea orderField = new TextArea();
+        orderField.setPromptText("Enter food items (comma separated)");
+
+        Button submit = new Button("Submit Order");
+
+        submit.setOnAction(e -> {
+            String name = nameField.getText().trim();
+            String[] items = orderField.getText().split(",");
+            ArrayList<String> orderList = new ArrayList<>();
+            for (String item : items) orderList.add(item.trim().toLowerCase());
+            cus_list.put(name, orderList);
+            paidCustomers.remove(name);
+            cu_bill.put(name, 0);
+            new Alert(Alert.AlertType.INFORMATION, "Order placed for " + name).show();
+            stage.close();
+        });
+
+        box.getChildren().addAll(new Label("Place Order"), nameField, orderField, submit);
+        stage.setScene(new Scene(box, 350, 250));
+        stage.setTitle("Place Order");
+        stage.show();
+    }
+
+    private void reserveTable() {
+        Stage stage = new Stage();
+        VBox box = new VBox(10);
+        box.setStyle("-fx-padding: 10;");
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Enter your name");
+
+        TextField tableField = new TextField();
+        tableField.setPromptText("Enter table number (1-5)");
+
+        Button reserveBtn = new Button("Reserve");
+
+        reserveBtn.setOnAction(e -> {
+            String name = nameField.getText().trim();
+            int table;
+            try {
+                table = Integer.parseInt(tableField.getText());
+            } catch (NumberFormatException ex) {
+                new Alert(Alert.AlertType.ERROR, "Please enter a valid table number").show();
+                return;
+            }
+            if (table < 1 || table > 5) {
+                new Alert(Alert.AlertType.ERROR, "Table number must be between 1 and 5").show();
+                return;
+            }
+            if (tableAvailability.getOrDefault(table, true)) {
+                tableAvailability.put(table, false);
+                cu_tab.put(name, String.valueOf(table));
+                new Alert(Alert.AlertType.INFORMATION, "Table " + table + " reserved for " + name).show();
+                stage.close();
+            } else {
+                new Alert(Alert.AlertType.ERROR, "Table already reserved.").show();
+            }
+        });
+
+        box.getChildren().addAll(new Label("Reserve Table"), nameField, tableField, reserveBtn);
+        stage.setScene(new Scene(box, 300, 200));
+        stage.setTitle("Table Reservation");
+        stage.show();
+    }
+
+    private void generateBill() {
+        Stage stage = new Stage();
+        VBox box = new VBox(10);
+        box.setStyle("-fx-padding: 10;");
+
+        TextField nameField = new TextField();
+        nameField.setPromptText("Enter your name");
+
+        Button generateBtn = new Button("Generate Bill");
+
+        generateBtn.setOnAction(e -> {
+            String name = nameField.getText().trim();
+            if (!cus_list.containsKey(name)) {
+                new Alert(Alert.AlertType.ERROR, "Customer not found.").show();
+                return;
+            }
+
+            ArrayList<String> orders = cus_list.get(name);
+            int total = 0;
+            StringBuilder invalidItems = new StringBuilder();
+
+            for (String item : orders) {
+                String price = menu.get(item);
+                if (price != null) {
+                    total += Integer.parseInt(price);
+                } else {
+                    invalidItems.append(item).append(", ");
+                }
+            }
+
+            cu_bill.put(name, total);
+            paidCustomers.add(name);
+
+            if (cu_tab.containsKey(name)) {
+                int table = Integer.parseInt(cu_tab.get(name));
+                tableAvailability.put(table, true);
+                cu_tab.remove(name);
+            }
+
+            String result = "Name: " + name +
+                    "\nOrder: " + String.join(", ", orders) +
+                    "\nBill: Rs." + total +
+                    "\nPoints Earned: " + (total / 10);
+
+            if (invalidItems.length() > 0) {
+                result += "\nInvalid items: " + invalidItems.toString();
+            }
+
+            new Alert(Alert.AlertType.INFORMATION, result).show();
+            stage.close();
+        });
+
+        box.getChildren().addAll(new Label("Generate Bill"), nameField, generateBtn);
+        stage.setScene(new Scene(box, 300, 200));
+        stage.setTitle("Bill Generator");
+        stage.show();
+    }
+
+    private void updateMenuPrice() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        TextField itemField = new TextField();
+        itemField.setPromptText("Enter item name");
+
+        TextField priceField = new TextField();
+        priceField.setPromptText("Enter new price");
+
+        Button update = new Button("Update Price");
+
+        update.setOnAction(e -> {
+            String item = itemField.getText().toLowerCase();
+            String newPrice = priceField.getText();
+            if (menu.containsKey(item)) {
+                menu.put(item, newPrice);
+                new Alert(Alert.AlertType.INFORMATION, "Updated " + item + " price to Rs." + newPrice).show();
+                stage.close();
+            } else {
+                new Alert(Alert.AlertType.ERROR, "Item not found in menu").show();
+            }
+        });
+
+        layout.getChildren().addAll(itemField, priceField, update);
+        stage.setScene(new Scene(layout, 300, 200));
+        stage.setTitle("Update Price");
+        stage.show();
+    }
+
+    private void addNewMenuItem() {
+        Stage stage = new Stage();
+        VBox layout = new VBox(10);
+        layout.setStyle("-fx-padding: 10;");
+
+        TextField itemField = new TextField();
+        itemField.setPromptText("Enter new item name");
+
+        TextField priceField = new TextField();
+        priceField.setPromptText("Enter price");
+
+        Button add = new Button("Add Item");
+
+        add.setOnAction(e -> {
+            String item = itemField.getText().toLowerCase();
+            String price = priceField.getText();
+            if (!menu.containsKey(item)) {
+                menu.put(item, price);
+                new Alert(Alert.AlertType.INFORMATION, "Added " + item + " to menu at Rs." + price).show();
+                stage.close();
+            } else {
+                new Alert(Alert.AlertType.WARNING, "Item already exists. Use update instead.").show();
+            }
+        });
+
+        layout.getChildren().addAll(itemField, priceField, add);
+        stage.setScene(new Scene(layout, 300, 200));
+        stage.setTitle("Add Item");
+        stage.show();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}
